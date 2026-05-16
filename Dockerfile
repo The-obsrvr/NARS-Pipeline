@@ -25,20 +25,6 @@ WORKDIR /app
 COPY requirements.txt /tmp/requirements.txt
 RUN python -m pip install --no-cache-dir -r /tmp/requirements.txt
 
-# --- User setup ---
-ARG uid
-ARG gid
-
-# Set derived values with ENV or just use directly
-ENV USER_ID=${uid}
-ENV USER_GROUP_ID=${gid}
-ARG USER=dh
-ARG USER_GROUP=dh
-
-RUN addgroup --gid ${USER_GROUP_ID} ${USER_GROUP}
-RUN adduser --gecos "" --disabled-password --uid ${USER_ID} --gid ${USER_GROUP_ID} ${USER}
-
-USER ${USER}
 COPY . /app
 
 # Expose Ollama port
