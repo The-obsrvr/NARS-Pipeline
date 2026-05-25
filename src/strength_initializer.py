@@ -44,78 +44,7 @@ log = logging.getLogger("strength_initializer")
 STRATEGY_MAP = {"ui": "s1", "gi": "s2", "ti": "s3", "hi": "s4"}
 ALL_STRATEGIES = ["ui", "gi", "ti", "hi"]
 
-
-# def strategy_centrality(bas, measure="harmonic"):
-#     log.info("[S2] Centrality  measure=%s", measure)
-#     G = bas_to_digraph(bas)
-#     if not G.nodes:
-#         return bas
-#     if measure == "harmonic":
-#         raw = _harmonic(G)
-#     elif measure == "betweenness":
-#         raw = dict(nx.betweenness_centrality(G, normalized=True))
-#     else:
-#         try:
-#             raw = dict(nx.pagerank(G, alpha=0.85))
-#         except nx.PowerIterationFailedConvergence:
-#             raw = dict(nx.degree_centrality(G))
-#
-#     ns = _normalise(raw)
-#     ew = {(e["source"], e["target"]): (ns.get(e["source"],0) + ns.get(e["target"],0)) / 2
-#           for e in bas["edges"]}
-#     return apply_strengths(bas, ns, ew, "s2")
-
-
-# class ArgumentQualityModel:
-#     def __init__(self, model_name="all-MiniLM-L6-v2"):
-#         from sentence_transformers import SentenceTransformer
-#         self.encoder = SentenceTransformer(model_name)
-#         self.dim     = self.encoder.get_sentence_embedding_dimension()
-#         self.W       = None
-#         self.b       = 0.0
-#         self._fitted = False
-#
-#     def _fmt(self, texts, topic):
-#         return [f"[TOPIC] {topic} [ARG] {t}" for t in texts] if topic else texts
-#
-#     def _sig(self, x):
-#         return np.where(x >= 0,
-#                         1.0 / (1.0 + np.exp(-x)),
-#                         np.exp(x) / (1.0 + np.exp(x)))
-#
-#     def score(self, texts, topic=None):
-#         if not self._fitted:
-#             raise RuntimeError("Model not fitted")
-#         embs = self.encoder.encode(self._fmt(texts, topic),
-#                                    convert_to_numpy=True, normalize_embeddings=True).astype(np.float32)
-#         return self._sig(embs @ self.W + self.b).flatten()
-#
-#     def fit(self, texts, scores, topic=None, epochs=50, lr=0.01, l2=1e-4):
-#         X = self.encoder.encode(self._fmt(texts, topic),
-#                                 convert_to_numpy=True, normalize_embeddings=True).astype(np.float32)
-#         y = np.array(scores, dtype=np.float32)
-#         self.W = np.random.randn(self.dim).astype(np.float32) * 0.01
-#         self.b = 0.0
-#         for ep in range(1, epochs + 1):
-#             p    = self._sig(X @ self.W + self.b)
-#             errs = p - y
-#             loss = float(np.mean(errs**2)) + l2 * float(np.dot(self.W, self.W))
-#             self.W -= lr * ((X.T @ errs) / len(y) + 2 * l2 * self.W)
-#             self.b -= lr * float(np.mean(errs))
-#             if ep % 10 == 0:
-#                 log.info("[S3] epoch %3d  MSE=%.5f", ep, loss)
-#         self._fitted = True
-#
-#     def save(self, path):
-#         path = Path(path); path.mkdir(parents=True, exist_ok=True)
-#         np.save(path / "W.npy", self.W)
-#         (path / "b.txt").write_text(str(self.b))
-#
-#     def load(self, path):
-#         path = Path(path)
-#         self.W = np.load(path / "W.npy")
-#         self.b = float((path / "b.txt").read_text())
-#         self._fitted = True
+ROOT_STRENGTH_OVERWRITE = False # overwrite central proposition to 1.0
 
 # ─── Helper functions
 def _normalise(values: dict) -> dict:
@@ -257,26 +186,37 @@ class ArgumentQualityModel:
     def score(self, texts: list, topic: str = None) -> np.ndarray:
         """
         Score a list of argument texts against the central proposition (topic).
-        If topic is None, texts are scored without a proposition prefix — less
-        accurate but still usable as a fallback.
+        Processes in small batches to avoid CUDA OOM on large conversations.
         """
         import torch
         queries = [topic] * len(texts) if topic else [""] * len(texts)
+        batch_size = 16
+        all_scores = []
+
         with torch.no_grad():
-            enc = self.tokenizer(
-                queries,
-                texts,
-                padding="max_length",
-                truncation=True,
-                max_length=self.max_len,
-                return_tensors="pt",
-                )
-            enc = {k: v.to(self.device) for k, v in enc.items()
-                   if k != "token_type_ids"}
-            out = self._encoder(**enc)
-            cls = self._dropout(out.last_hidden_state[:, 0, :])
-            scores = self._sigmoid(self._regressor(cls)).squeeze(-1)
-            return scores.cpu().numpy().astype(np.float32)
+            for i in range(0, len(texts), batch_size):
+                q_batch = queries[i:i + batch_size]
+                t_batch = texts[i:i + batch_size]
+                enc = self.tokenizer(
+                    q_batch,
+                    t_batch,
+                    padding="max_length",
+                    truncation=True,
+                    max_length=self.max_len,
+                    return_tensors="pt",
+                    )
+                enc = {k: v.to(self.device) for k, v in enc.items()
+                       if k != "token_type_ids"}
+                out = self._encoder(**enc)
+                cls = self._dropout(out.last_hidden_state[:, 0, :])
+                scores = self._sigmoid(self._regressor(cls)).squeeze(-1)
+                all_scores.append(scores.cpu())
+
+        return np.concatenate([s.numpy() for s in all_scores]).astype(np.float32)
+
+    @property
+    def encoder(self):
+        return self._encoder
 
 
 def strategy_ti(
@@ -302,6 +242,12 @@ def strategy_ti(
     if model_dir and (model_dir / "pytorch_model.bin").exists():
         qm = ArgumentQualityModel(model_dir)
         raw = qm.score(texts, topic=topic)
+        import torch
+        qm._encoder.cpu()
+        qm._regressor.cpu()
+        del qm
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         log.info("[TI/s3] Using fine-tuned DeBERTa quality model")
     elif topic:
         from sentence_transformers import SentenceTransformer
@@ -419,7 +365,7 @@ def initialize_strengths(
 
     # ── Override root node strength to 1.0 across all strategies ─────────────
     root_id = bas.get("summary", {}).get("root_id")
-    if root_id:
+    if root_id and ROOT_STRENGTH_OVERWRITE:
         for node in result["nodes"]:
             if node["id"] == root_id:
                 for strat in resolved:
@@ -561,7 +507,7 @@ def main() -> None:
         import llm_reasoner as lr, bas_assembler as ba
         with JSONLWriter(Path(args.output_repair)) as writer:
             for i, conv in enumerate(SAMPLE_CONVERSATIONS, 1):
-                log_progress(i, len(SAMPLE_CONVERSATIONS), conv.get("conv_id", ""), "INIT", log)
+                log_progress(i, len(SAMPLE_CONVERSATIONS), conv.get("thread_id", ""), "INIT", log)
                 repair_bas, _ = ba.assemble_bas(
                     lr.run_reasoning(ps.select_all_pacs(ee.extract_edus(conv)))
                     )

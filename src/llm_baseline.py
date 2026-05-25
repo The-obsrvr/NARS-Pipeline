@@ -300,7 +300,7 @@ def call_ollama(prompt: str, model: str, ollama_url: str):
     """
     model_lower = model.lower()
     if "gpt" in model_lower:
-        think_val = "low"      # gpt-oss uses string levels
+        think_val = "medium"      # gpt-oss uses string levels
     else:
         think_val = True       # Qwen3, Gemma4 use boolean
 

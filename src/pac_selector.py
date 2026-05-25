@@ -179,7 +179,7 @@ def select_all_pacs(
     conversation = edu_output.get("conversation", [])
     edu_index    = build_edu_index(conversation)
     N            = len(edu_index)
-    conv_id = edu_output.get("conv_id", "?")
+    thread_id = edu_output.get("thread_id", "?")
 
     if N == 0:
         log.warning("No EDUs found — returning input unchanged")
@@ -290,7 +290,7 @@ def run_on_jsonl(
 
     with JSONLWriter(output_path) as writer:
         for line_no, conv in read_jsonl(input_path):
-            log_progress(line_no, total, conv.get("conv_id",""), "PAC", log)
+            log_progress(line_no, total, conv.get("thread_id",""), "PAC", log)
             result = select_all_pacs(conv, model_name, k, threshold, top_n, window)
             writer.write(result)
 
@@ -334,7 +334,7 @@ def main() -> None:
         get_encoder(args.model)
         with JSONLWriter(Path(args.output)) as writer:
             for i, conv in enumerate(SAMPLE_CONVERSATIONS, 1):
-                log_progress(i, len(SAMPLE_CONVERSATIONS), conv.get("conv_id", ""), "PAC", log)
+                log_progress(i, len(SAMPLE_CONVERSATIONS), conv.get("thread_id", ""), "PAC", log)
                 edu_conv = ee.extract_edus(conv)
                 writer.write(select_all_pacs(edu_conv, args.model,
                                              args.k, args.threshold, args.top_n, args.window

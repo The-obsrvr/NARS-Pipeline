@@ -638,7 +638,7 @@ def assemble_bas(
     Full BAS assembly pipeline — produces both modes in a single pass.
 
     Args:
-        reasoning_output: Output dict from llm_reasoner.py (contains conv_id,
+        reasoning_output: Output dict from llm_reasoner.py (contains thread_id,
                           title, conversation, and per-EDU reasoning results).
         ollama_url:       If provided, use LLM to identify P_central.
                           Falls back to heuristic if None or on failure.
@@ -652,13 +652,13 @@ def assemble_bas(
     is_delta   = reasoning_output.get("is_delta")
     title      = reasoning_output.get("title", "")
     topic_text = reasoning_output.get("topic")
-    log.info("─── BAS Assembly  conv_id=%s ──", conv_id)
+    log.info("─── BAS Assembly thread_id=%s ──", thread_id)
 
     # ── Step 1: extract argumentative nodes and non-neutral edges ─────────────
     nodes, raw_edges = extract_nodes_and_edges(reasoning_output)
 
     if not nodes:
-        log.warning("conv_id=%s — no argumentative nodes found, skipping", conv_id)
+        log.warning("thread_id=%s — no argumentative nodes found, skipping", thread_id)
         return None, None
 
     # ── Step 2: promote source EDUs and deduplicate edges ────────────────────
@@ -694,8 +694,8 @@ def assemble_bas(
     repair_summary = compute_summary(nodes, repair_edges, root_id)
 
     if is_too_small(nodes):
-        log.info("conv_id=%s — only %d argumentative units (≤ %d), discarding",
-                 conv_id, len(nodes), MIN_ARGUMENTATIVE_UNITS)
+        log.info("thread_id=%s — only %d argumentative units (≤ %d), discarding",
+                 thread_id, len(nodes), MIN_ARGUMENTATIVE_UNITS)
         return None, None   # too small for both modes
 
     repair_bas = {
@@ -726,9 +726,9 @@ def assemble_bas(
 
     if is_too_small(nr_nodes):
         log.info(
-            "conv_id=%s — no-repair central component has only %d units (≤ %d), "
+            "thread_id=%s — no-repair central component has only %d units (≤ %d), "
             "discarding both modes to keep repair and no-repair counts equal",
-            conv_id, len(nr_nodes), MIN_ARGUMENTATIVE_UNITS,
+            thread_id, len(nr_nodes), MIN_ARGUMENTATIVE_UNITS,
         )
         return None, None
     no_repair_bas = {
@@ -767,7 +767,7 @@ def run_on_jsonl(
     with JSONLWriter(output_repair) as wr_repair, \
          JSONLWriter(output_no_repair) as wr_no_rep:
         for line_no, conv in read_jsonl(input_path):
-            log_progress(line_no, total, conv.get("conv_id", ""), "BAS", log)
+            log_progress(line_no, total, conv.get("thread_id", ""), "BAS", log)
             repair_bas, no_repair_bas = assemble_bas(conv,
                                                      ollama_url=ollama_url,
                                                      model=model)
@@ -835,7 +835,7 @@ def main() -> None:
         with JSONLWriter(Path(args.output_repair)) as wr_repair, \
              JSONLWriter(Path(args.output_no_repair)) as wr_no_rep:
             for i, conv in enumerate(SAMPLE_CONVERSATIONS, 1):
-                log_progress(i, len(SAMPLE_CONVERSATIONS), conv.get("conv_id", ""), "BAS", log)
+                log_progress(i, len(SAMPLE_CONVERSATIONS), conv.get("thread_id", ""), "BAS", log)
                 repair_bas, no_repair_bas = assemble_bas(
                     lr.run_reasoning(ps.select_all_pacs(ee.extract_edus(conv))),
                     ollama_url=args.ollama_url,

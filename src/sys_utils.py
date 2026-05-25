@@ -114,13 +114,13 @@ class JSONLWriter:
 def log_progress(
     current:  int,
     total:    int,
-    conv_id:  str = "",
+    thread_id:  str = "",
     step:     str = "",
     logger:   logging.Logger = log,
 ) -> None:
     """Emit a consistent progress line that is easy to grep in logs."""
     pct    = 100.0 * current / total if total else 0.0
-    id_str = f"  [{conv_id}]" if conv_id else ""
+    id_str = f"  [{thread_id}]" if thread_id else ""
     step_s = f"[{step}] " if step else ""
     logger.info("%sConversation %d/%d (%.1f%%)%s", step_s, current, total, pct, id_str)
 

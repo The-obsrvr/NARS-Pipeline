@@ -287,10 +287,10 @@ def extract_edus(conv: dict) -> dict:
     """
     turns = [t for t in conv.get("conversation", []) if not t.get("deleted")]
     total = len(turns)
-    conv_id = conv.get("conv_id", "?")
+    thread_id = conv.get("thread_id", "?")
 
-    log.info("conv_id=%s  turns=%d  title=%.55s",
-             conv_id, total, conv.get("title", "")
+    log.info("thread_id=%s  turns=%d  title=%.55s",
+             thread_id, total, conv.get("title", "")
              )
 
     if total == 0:
@@ -353,8 +353,8 @@ def extract_edus(conv: dict) -> dict:
         enriched.append({**turn, "edus": filtered, "edu_count": len(filtered)})
         grand_total += len(filtered)
 
-    log.info("conv_id=%s  done — %d EDUs across %d turns in %.1fs",
-             conv_id, grand_total, total, elapsed
+    log.info("thread_id=%s  done — %d EDUs across %d turns in %.1fs",
+             thread_id, grand_total, total, elapsed
              )
 
     return {
@@ -366,9 +366,9 @@ def extract_edus(conv: dict) -> dict:
 
 # ─── JSONL batch runner ───────────────────────────────────────────────────────
 
-def load_completed_conv_ids(output_path: Path) -> set[str]:
+def load_completed_thread_ids(output_path: Path) -> set[str]:
     """
-    Scan an existing output JSONL file and return the set of conv_ids that
+    Scan an existing output JSONL file and return the set of thread_ids that
     have already been successfully processed (have a non-empty edu_summary).
     Returns an empty set if the file does not exist.
     """
@@ -377,11 +377,11 @@ def load_completed_conv_ids(output_path: Path) -> set[str]:
         return completed
 
     for _, record in read_jsonl(output_path):
-        conv_id = record.get("conv_id")
+        thread_id = record.get("thread_id")
         summary = record.get("edu_summary", {})
         # Only count as done if EDU extraction actually ran
-        if conv_id and "total_edus" in summary:
-            completed.add(conv_id)
+        if thread_id and "total_edus" in summary:
+            completed.add(thread_id)
 
     log.info("Resume: found %d already-completed conversations in %s",
              len(completed), output_path
@@ -393,8 +393,8 @@ def run_on_jsonl(input_path: Path, output_path: Path) -> None:
     total = count_lines(input_path)
     out_path = Path(output_path)
 
-    # ── Resume: scan output file for already-processed conv_ids ───────────────
-    completed = load_completed_conv_ids(out_path)
+    # ── Resume: scan output file for already-processed thread_ids ───────────────
+    completed = load_completed_thread_ids(out_path)
     n_skip = 0
 
     if completed:
@@ -414,14 +414,14 @@ def run_on_jsonl(input_path: Path, output_path: Path) -> None:
 
     with open(out_path, file_mode, encoding="utf-8") as out_f:
         for line_no, conv in read_jsonl(input_path):
-            conv_id = conv.get("conv_id", "")
+            thread_id = conv.get("thread_id", "")
 
-            if conv_id in completed:
-                log.debug("Skipping already-completed conv_id=%s", conv_id)
+            if thread_id in completed:
+                log.debug("Skipping already-completed thread_id=%s", thread_id)
                 n_skip += 1
                 continue
 
-            log_progress(line_no, total, conv_id, "EDU", log)
+            log_progress(line_no, total, thread_id, "EDU", log)
             result = extract_edus(conv)
             out_f.write(json.dumps(result, ensure_ascii=False) + "\n")
             out_f.flush()  # flush after each conversation — safe against crashes
@@ -479,7 +479,7 @@ def main() -> None:
         with JSONLWriter(Path(args.output)) as writer:
             for i, conv in enumerate(SAMPLE_CONVERSATIONS, 1):
                 log_progress(i, len(SAMPLE_CONVERSATIONS),
-                             conv.get("conv_id", ""), "EDU", log
+                             conv.get("thread_id", ""), "EDU", log
                              )
                 writer.write(extract_edus(conv))
 

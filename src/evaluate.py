@@ -1,14 +1,5 @@
 """
-Evaluation Script — Persuasiveness Detection Results  (Step 7 output)
-
-Reads predictions JSONL file(s) produced by persuasiveness_detector.py and
-computes Accuracy, F1-score, and AUC-ROC for each:
-  - Threshold δ ∈ {0.1, 0.3, 0.5, 0.7, 0.9}
-  - Initialization strategy (UI/GI/TI/HI) + Ensemble
-  - BAS mode (repair / no-repair) side by side when both are provided
-
-AUC-ROC uses |Δ(root)| (the absolute strength change) as the continuous score,
-allowing threshold-free evaluation of ranking quality.
+Evaluation Script — Persuasiveness Detection Results
 
 Usage:
     # Single mode:
@@ -22,8 +13,6 @@ Usage:
     # Save results to JSON:
     python evaluate.py --input predictions_repair.jsonl --output results.json
 
-Requirements:
-    pip install scikit-learn
 """
 
 import argparse
@@ -84,7 +73,7 @@ def load_predictions(path: Path) -> tuple[list[dict], dict, list[float]]:
 
 def load_ground_truth(path: Path, gt_key: str = "is_delta") -> dict[str, bool]:
     """
-    Optionally load ground truth from original data JSONL, keyed by conv_id.
+    Optionally load ground truth from original data JSONL, keyed by thread_id.
     Used as fallback when is_delta is not embedded in prediction records.
     """
     gt = {}
@@ -94,22 +83,22 @@ def load_ground_truth(path: Path, gt_key: str = "is_delta") -> dict[str, bool]:
             if not line:
                 continue
             obj     = json.loads(line)
-            conv_id = obj.get("conv_id") or obj.get("thread_id", "").rsplit("_", 1)[0]
+            thread_id = obj.get("thread_id")
             gt_raw  = obj.get(gt_key)
-            if conv_id and gt_raw is not None:
-                gt[conv_id] = bool(gt_raw)
+            if thread_id and gt_raw is not None:
+                gt[thread_id] = bool(gt_raw)
     log.info("Loaded %d ground truth labels from %s  (key=%s)", len(gt), path, gt_key)
     return gt
 
 
 def inject_ground_truth(records: list[dict], gt: dict[str, bool]) -> list[dict]:
-    """Inject ground truth labels into records by conv_id."""
+    """Inject ground truth labels into records by thread_id."""
     matched = unmatched = 0
     for rec in records:
         if rec.get("ground_truth") is None:
-            conv_id = rec.get("conv_id")
-            if conv_id and conv_id in gt:
-                rec["ground_truth"] = gt[conv_id]
+            thread_id = rec.get("thread_id")
+            if thread_id and thread_id in gt:
+                rec["ground_truth"] = gt[thread_id]
                 matched += 1
             else:
                 unmatched += 1
@@ -137,7 +126,6 @@ def f1(y_true: list, y_pred: list) -> float:
 
 def auc_roc(y_true: list, y_scores: list) -> float:
     """
-    Compute AUC-ROC via trapezoidal rule (no sklearn dependency).
     y_scores are continuous values (|Δ| per strategy).
     """
     if len(set(y_true)) < 2:
@@ -292,6 +280,8 @@ def print_comparison(repair_results: dict, no_repair_results: dict) -> None:
 # ─── CLI ──────────────────────────────────────────────────────────────────────
 
 def main():
+
+    global repair_results, no_repair_results
     parser = argparse.ArgumentParser(
         description="Evaluate persuasiveness detection results"
     )

@@ -45,9 +45,10 @@ DEFAULT_EPS     = 1e-6
 DEFAULT_MAX_T   = 1000
 
 SYNTHETIC_EDGE_WEIGHT = 0.7   # weight assigned to repair-mode synthetic edges
+ATTACK_WEIGHT_MULTIPLIER = 3.0   # amplify attack edges (applied when --attack-boost enabled)
 
 # ─── Matrix builders
-def build_weight_matrices(node_ids, bas, strategy, row_norm=True):
+def build_weight_matrices(node_ids, bas, strategy, row_norm=True, attack_boost=False):
     n       = len(node_ids)
     idx     = {nid: i for i, nid in enumerate(node_ids)}
     Wp      = np.zeros((n, n), dtype=np.float64)
@@ -57,16 +58,15 @@ def build_weight_matrices(node_ids, bas, strategy, row_norm=True):
         src, tgt, rel = edge.get("source"), edge.get("target"), edge.get("relation")
         if src not in idx or tgt not in idx:
             continue
-        # Synthetic edges (repair mode) get a discounted weight to reflect
-        # their lower confidence relative to LLM-predicted relations
         if edge.get("synthetic", False):
             w = SYNTHETIC_EDGE_WEIGHT
         else:
-            # default to equal weight strategy of 1.0
             w = float(edge.get(wkey, edge.get("weight", 1.0)))
         i, j = idx[src], idx[tgt]
-        if rel == "support":   Wp[i, j] = w
-        elif rel == "attack":  Wm[i, j] = w
+        if rel == "support":
+            Wp[i, j] = w
+        elif rel == "attack":
+            Wm[i, j] = w * (ATTACK_WEIGHT_MULTIPLIER if attack_boost else 1.0)
     if row_norm:
         for j in range(n):
             cs = Wp[:, j].sum()
@@ -74,6 +74,7 @@ def build_weight_matrices(node_ids, bas, strategy, row_norm=True):
             cs = Wm[:, j].sum()
             if cs > 0: Wm[:, j] /= cs
     return Wp, Wm
+
 
 
 def build_b(node_ids, bas, strategy):
@@ -98,7 +99,8 @@ def sigma(x, tau):
                     )
 
 
-def run_gradual_semantics(Wp, Wm, b, lam, tau, beta, eps, max_iter, store_traj=False):
+def run_gradual_semantics(Wp, Wm, b, lam, tau, beta, eps, max_iter,
+                          store_traj=False):
     """
     Implements Algorithm— Iterative Strength Propagation using Gradual Semantics:
       s^(0) = b
@@ -109,6 +111,7 @@ def run_gradual_semantics(Wp, Wm, b, lam, tau, beta, eps, max_iter, store_traj=F
       s^(t+1) = (1-λ)·s^(t) + λ·s̃^(t+1)
       until ‖s^(t) - s^(t-1)‖_∞ < ε or t ≥ T_max
     """
+    global t
     s    = b.copy()
     traj = [s.copy()] if store_traj else []
     conv, delta = False, float("inf")
@@ -144,7 +147,7 @@ def _detect_strategies(bas):
 # ─── Single-conversation entry point ─────────────────────────────────────────
 def compute_gradual_semantics(bas, strategies, lam=DEFAULT_LAMBDA, tau=DEFAULT_TAU,
                                beta=DEFAULT_BETA, eps=DEFAULT_EPS,
-                               max_iter=DEFAULT_MAX_T, row_norm=True, store_traj=False):
+                               max_iter=DEFAULT_MAX_T, row_norm=True, store_traj=False, attack_boost=False):
     """
     Run gradual argumentation semantics on a single BAS dict.
     Produces acceptability scores for each node under each strategy.
@@ -170,7 +173,7 @@ def compute_gradual_semantics(bas, strategies, lam=DEFAULT_LAMBDA, tau=DEFAULT_T
     node_id_list = list(node_ids)
 
     for strat in resolved:
-        Wp, Wm = build_weight_matrices(node_ids, bas_out, strat, row_norm)
+        Wp, Wm = build_weight_matrices(node_ids, bas_out, strat, row_norm, attack_boost)
         b      = build_b(node_ids, bas_out, strat)
         result = run_gradual_semantics(Wp, Wm, b, lam, tau, beta, eps, max_iter, store_traj)
         s      = result["s_star"]
@@ -242,6 +245,9 @@ def main():
     parser.add_argument("--eps",               type=float, default=DEFAULT_EPS)
     parser.add_argument("--max-iter",          type=int,   default=DEFAULT_MAX_T)
     parser.add_argument("--no-row-norm",       action="store_true")
+    parser.add_argument("--attack-boost",      action="store_true",
+                        help=f"Amplify attack edge weights by {ATTACK_WEIGHT_MULTIPLIER}x "
+                             f"to balance them against the dominant support edges")
     parser.add_argument("--export-trajectory", action="store_true")
     parser.add_argument("--verbose",           "-v", action="store_true")
     parser.add_argument("--log-file", "-l", default="gradual_semantics.log",
@@ -276,7 +282,7 @@ def main():
         import strength_initializer as si
         with JSONLWriter(Path(args.output_repair)) as writer:
             for i, conv in enumerate(SAMPLE_CONVERSATIONS, 1):
-                log_progress(i, len(SAMPLE_CONVERSATIONS), conv.get("conv_id", ""), "SEM", log)
+                log_progress(i, len(SAMPLE_CONVERSATIONS), conv.get("thread_id", ""), "SEM", log)
                 repair_bas, _ = ba.assemble_bas(
                     lr.run_reasoning(ps.select_all_pacs(ee.extract_edus(conv)))
                     )

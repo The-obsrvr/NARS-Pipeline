@@ -530,11 +530,11 @@ def run_reasoning(
                 edu.get("text", "") if isinstance(edu, dict) else str(edu)
             )
 
-    conv_id = pac_output.get("conv_id", "?")
+    thread_id = pac_output.get("thread_id", "?")
     N       = len(all_edu_texts)
     log.info(
-        "Starting LLM reasoning — conv_id:%s  %d EDUs  batch_size=%d  context_window=±%d",
-        conv_id, N, batch_size, context_window,
+        "Starting LLM reasoning — thread_id:%s  %d EDUs  batch_size=%d  context_window=±%d",
+        thread_id, N, batch_size, context_window,
     )
 
     # Counters for summary
@@ -563,8 +563,8 @@ def run_reasoning(
         batch_no   = batch_start // batch_size + 1
 
         log.info(
-            "  conv_id=%s  batch [%d/%d]  EDUs=%d",
-            conv_id, batch_no, total_batches, len(batch_edus),
+            "  thread_id=%s  batch [%d/%d]  EDUs=%d",
+            thread_id, batch_no, total_batches, len(batch_edus),
         )
 
         # Build batch_items — one per target EDU in this batch
@@ -688,9 +688,9 @@ def run_reasoning(
     }
 
     log.info(
-        "Reasoning complete — conv_id=%s  %d/%d argumentative EDUs  "
+        "Reasoning complete — thread_id=%s  %d/%d argumentative EDUs  "
         "support=%d  attack=%d  neutral=%d",
-        conv_id, total_argumentative, N,
+        thread_id, total_argumentative, N,
         total_support, total_attack, total_neutral,
     )
 
@@ -701,9 +701,9 @@ def run_reasoning(
     }
 
 
-def load_completed_conv_ids(output_path: Path) -> set[str]:
+def load_completed_thread_ids(output_path: Path) -> set[str]:
     """
-    Scan an existing output JSONL file and return the set of conv_ids that
+    Scan an existing output JSONL file and return the set of thread_ids that
     have already been processed (i.e. have a reasoning_summary present).
     Returns an empty set if the file does not exist.
     """
@@ -712,10 +712,10 @@ def load_completed_conv_ids(output_path: Path) -> set[str]:
         return completed
 
     for _, record in read_jsonl(output_path):
-        conv_id = record.get("conv_id")
+        thread_id = record.get("thread_id")
         # Only count as done if reasoning actually ran (not just copied through)
-        if conv_id and "reasoning_summary" in record:
-            completed.add(conv_id)
+        if thread_id and "reasoning_summary" in record:
+            completed.add(thread_id)
 
     log.info("Resume: found %d already-completed conversations in %s",
              len(completed), output_path)
@@ -727,8 +727,8 @@ def run_on_jsonl(input_path, output_path, batch_size, context_window,
     total    = count_lines(input_path)
     out_path = Path(output_path)
 
-    # ── Resume: scan output file for already-processed conv_ids
-    completed = load_completed_conv_ids(out_path)
+    # ── Resume: scan output file for already-processed thread_ids
+    completed = load_completed_thread_ids(out_path)
     n_skip    = 0
 
     if completed:
@@ -746,14 +746,14 @@ def run_on_jsonl(input_path, output_path, batch_size, context_window,
 
     with open(out_path, file_mode, encoding="utf-8") as out_f:
         for line_no, conv in read_jsonl(input_path):
-            conv_id = conv.get("conv_id", "")
+            thread_id = conv.get("thread_id", "")
 
-            if conv_id in completed:
-                log.debug("Skipping already-completed conv_id=%s", conv_id)
+            if thread_id in completed:
+                log.debug("Skipping already-completed thread_id=%s", thread_id)
                 n_skip += 1
                 continue
 
-            log_progress(line_no, total, conv_id, "REASON", log)
+            log_progress(line_no, total, thread_id, "REASON", log)
             result = run_reasoning(conv, batch_size, context_window,
                                    temp1, temp2, temp_tiebreak)
             out_f.write(json.dumps(result, ensure_ascii=False) + "\n")
@@ -824,7 +824,7 @@ def main() -> None:
         import pac_selector  as ps
         with JSONLWriter(Path(args.output)) as writer:
             for i, conv in enumerate(SAMPLE_CONVERSATIONS, 1):
-                log_progress(i, len(SAMPLE_CONVERSATIONS), conv.get("conv_id",""), "REASON", log)
+                log_progress(i, len(SAMPLE_CONVERSATIONS), conv.get("thread_id",""), "REASON", log)
                 edu = ee.extract_edus(conv)
                 pac = ps.select_all_pacs(edu)
                 writer.write(run_reasoning(pac, args.batch_size, args.context_window,

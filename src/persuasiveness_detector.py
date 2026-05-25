@@ -80,9 +80,9 @@ def predict_conversation(sem_output: dict, threshold: float,
                          ground_truth: Optional[bool] = None) -> dict:
     root = get_root_node(sem_output)
     if root is None:
-        log.warning("conv_id=%s — no root node", sem_output.get("conv_id","?"))
+        log.warning("thread_id=%s — no root node", sem_output.get("thread_id","?"))
         return {
-            "conv_id": sem_output.get("conv_id"), "root_id": None, "root_text": None,
+            "thread_id": sem_output.get("thread_id"), "root_id": None, "root_text": None,
             "predictions": {}, "ensemble": ensemble_vote({}),
             "ground_truth": ground_truth, "correct": None,
         }
@@ -100,15 +100,15 @@ def predict_conversation(sem_output: dict, threshold: float,
             p["correct"] = None
         ensemble["correct"] = None
 
-    log.info("conv_id=%-15s  root=[%s]  ens=%s  gt=%s",
-             sem_output.get("conv_id","?"), root.get("id"),
+    log.info("thread_id=%-15s  root=[%s]  ens=%s  gt=%s",
+             sem_output.get("thread_id","?"), root.get("id"),
              ensemble["predicted"], ground_truth)
     for strat, p in predictions.items():
         log.debug("  [%s]  Δ=%+.4f  predicted=%s  correct=%s",
                   strat.upper(), p["delta"], p["predicted"], p.get("correct"))
 
     return {
-        "conv_id":      sem_output.get("conv_id"),
+        "thread_id":      sem_output.get("thread_id"),
         "root_id":      root.get("id"),
         "root_text":    root.get("text"),
         "predictions":  predictions,
@@ -174,7 +174,7 @@ def tune_threshold(records, metric="f1", strategy="ensemble"):
                 root_mock[f"initial_strength_{strat}"] = pred["initial"]
                 root_mock[f"acceptability_{strat}"]    = pred["final"]
             sem_copy = {"nodes": [root_mock], "summary": {"root_id": r["root_id"]},
-                        "conv_id": r["conv_id"]}
+                        "thread_id": r["thread_id"]}
             re_records.append(predict_conversation(sem_copy, thresh, r["ground_truth"]))
 
         ev = evaluate_dataset(re_records)
@@ -201,7 +201,7 @@ def run_on_jsonl(input_path, output_path, thresholds, gt_key, tune, tune_metric,
 
     with JSONLWriter(output_path) as writer:
         for line_no, sem in read_jsonl(input_path):
-            log_progress(line_no, total, sem.get("conv_id", ""), "PREDICT", log)
+            log_progress(line_no, total, sem.get("thread_id", ""), "PREDICT", log)
             gt_raw = sem.get(gt_key)
             gt: Optional[bool] = None
             if gt_raw is not None:
@@ -236,7 +236,7 @@ def run_on_jsonl(input_path, output_path, thresholds, gt_key, tune, tune_metric,
             for r in records:
                 tr = r["thresholds"].get(str(thresh), {})
                 thresh_records.append({
-                    "conv_id": r["conv_id"],
+                    "thread_id": r["thread_id"],
                     "ground_truth": r["ground_truth"],
                     "predictions": tr.get("predictions", {}),
                     "ensemble": tr.get("ensemble", {}),
@@ -265,7 +265,7 @@ def run_on_jsonl(input_path, output_path, thresholds, gt_key, tune, tune_metric,
 
 def print_prediction(rec: dict) -> None:
     print(f"\n{'═'*70}")
-    print(f"  conv_id : {rec.get('conv_id')}   root: [{rec.get('root_id')}]")
+    print(f"  thread_id : {rec.get('thread_id')}   root: [{rec.get('root_id')}]")
     print(f"  text    : \"{rec.get('root_text','')[:60]}\"")
     print(f"  GT      : {rec.get('ground_truth')}")
     print(f"  {'Strategy':<10}  {'Initial':>8}  {'Final':>8}  {'Δ':>8}  {'|Δ|':>8}  {'Predicted':<12}")
@@ -351,7 +351,7 @@ def main():
             records = []
             for i, conv in enumerate(SAMPLE_CONVERSATIONS, 1):
                 log_progress(i, len(SAMPLE_CONVERSATIONS),
-                             conv.get("conv_id", ""), "PREDICT", log
+                             conv.get("thread_id", ""), "PREDICT", log
                              )
                 repair_bas, _ = ba.assemble_bas(
                     lr.run_reasoning(ps.select_all_pacs(ee.extract_edus(conv)))
@@ -369,7 +369,7 @@ def main():
                         "ensemble": rec["ensemble"],
                         }
                 record = {
-                    "conv_id": sem.get("conv_id"),
+                    "thread_id": sem.get("thread_id"),
                     "root_id": root.get("id") if root else None,
                     "root_text": root.get("text") if root else None,
                     "ground_truth": None,
